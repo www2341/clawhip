@@ -11,10 +11,12 @@ for arg in "$@"; do
 done
 
 cd "$REPO_ROOT"
-echo "[clawhip] installing from $REPO_ROOT"
+echo "[clawhip] install flow: clone -> install.sh -> SKILL attach -> config scaffold -> daemon start -> live verification"
+echo "[clawhip] repo root: $REPO_ROOT"
 cargo install --path . --force
 mkdir -p "$HOME/.clawhip"
 echo "[clawhip] ensured config dir $HOME/.clawhip"
+echo "[clawhip] next: read SKILL.md and attach the skill surface"
 
 if [[ "$SYSTEMD" == "1" ]]; then
   sudo cp deploy/clawhip.service /etc/systemd/system/clawhip.service
@@ -23,4 +25,5 @@ if [[ "$SYSTEMD" == "1" ]]; then
   echo "[clawhip] systemd unit installed and started"
 fi
 
+echo "[clawhip] recommended verification: scripts/live-verify-default-presets.sh <mode>"
 echo "[clawhip] install complete"

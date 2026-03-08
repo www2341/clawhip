@@ -1,221 +1,260 @@
-<p align="center">
-  <img src="assets/clawhip-mascot.jpg" alt="clawhip mascot" width="420">
-</p>
+# clawhip
 
-<h1 align="center">🦞🔥 clawhip</h1>
+## Description
 
-<p align="center">
-  <strong>Daemon-first event gateway for Discord</strong><br>
-  GitHub webhooks, git polling, tmux monitoring, and CLI clients all flow through one daemon.
-</p>
+Operational spec for OpenClaw / Clawdbot agents consuming this repo.
 
----
+Repo role:
+- executable/runtime repo
+- daemon-first Discord notification gateway
+- built-in GitHub/git/tmux monitoring runtime
+- route/filter/message-render engine
+- lifecycle surface: install / update / uninstall / start / status
 
-## What clawhip is
+Attachment model:
+- repo = runtime
+- `SKILL.md` = attach/install/usage instructions for OpenClaw / Clawdbot
+- README = agent-facing operational spec
 
-`clawhip` is a **daemon**, not a one-shot direct-to-Discord CLI.
+Default daemon endpoint:
+- `http://127.0.0.1:25294`
 
-The daemon listens on **port `25294` by default** and is the **single delivery point** for all notifications.
+## OpenClaw install contract
 
-Architecture:
-
-```text
-[CLI client] --------------------------->
-[GitHub webhook] ----------------------->
-[Built-in git monitor] ----------------->  [clawhip daemon :25294] -> [route/filter engine] -> [Discord REST API]
-[Built-in tmux monitor] --------------->
-[clawhip tmux new registration] ------->
-```
-
-Everything routes through the daemon.
-
-## Core model
-
-- `clawhip` or `clawhip start` starts the daemon
-- `clawhip status` checks daemon health
-- `clawhip send`, `clawhip github ...`, `clawhip git ...`, `clawhip tmux keyword|stale ...` are **thin clients**
-- thin clients POST events to the local daemon API
-- the daemon performs all Discord delivery
-- the daemon also runs built-in:
-  - git repo polling
-  - tmux keyword monitoring
-  - tmux staleness monitoring
-
-## Default port
-
-Default daemon port: **`25294`**
-
-Why `25294`?
-- `CLAW` on a phone keypad -> `2529`
-- plus `4` for the whip
-
-Default daemon base URL:
+Primary install entrypoint:
 
 ```text
-http://127.0.0.1:25294
+@openclaw install <repo_url>
 ```
 
-## Install / update / uninstall
+Expected downstream automation behavior:
 
-clawhip now includes lifecycle commands:
+1. clone repo
+2. run `./install.sh`
+3. read `SKILL.md`
+4. attach skill
+5. scaffold config / presets
+6. start daemon
+7. run live verification
 
-```bash
-# install from current git clone
-clawhip install
+Reference repo URL:
 
-# install and set up systemd
-clawhip install --systemd
-
-# update from current git clone and optionally restart daemon
-clawhip update --restart
-
-# uninstall binary
-clawhip uninstall
-
-# uninstall and also remove systemd/config
-clawhip uninstall --remove-systemd --remove-config
+```text
+https://github.com/Yeachan-Heo/clawhip
 ```
 
-A repo-root helper script is also included:
+## System model
 
-```bash
-./install.sh
-./install.sh --systemd
+```text
+[input] -> [clawhip daemon :25294] -> [route/filter/preset render] -> [Discord REST delivery]
 ```
 
-## Commands
+Input sources:
+- CLI thin clients
+- GitHub webhooks
+- built-in git monitor
+- built-in tmux monitor
+- `clawhip tmux new` registration path
 
-### Start the daemon
+## Input -> behavior -> verification
 
+### 1. Custom client event
+
+Input:
 ```bash
-# default daemon mode
-clawhip
-
-# explicit
-clawhip start
-
-# override port
-clawhip start --port 25294
+clawhip send --channel <id> --message "text"
 ```
 
-### Check daemon health
+Behavior:
+- POST to daemon `/api/event`
+- daemon routes event
+- Discord message emitted
 
+Verification:
+- `clawhip status`
+- inspect configured Discord channel for rendered payload
+
+### 2. GitHub issue preset family
+
+Input:
+- GitHub webhook `issues.opened`
+- built-in GitHub issue monitor detection
+- CLI thin client `clawhip github issue-opened ...`
+
+Behavior:
+- emit `github.issue-opened`
+- route via `github.*`
+- apply repo filter
+- prepend route mention if configured
+- send to Discord
+
+Verification:
+- create real issue
+- confirm final Discord body contains:
+  - repo
+  - issue number
+  - title
+  - mention when configured
+
+### 3. GitHub issue commented preset
+
+Input:
+- GitHub webhook `issue_comment.created`
+- built-in GitHub issue monitor comment delta
+
+Behavior:
+- emit `github.issue-commented`
+- route via `github.*`
+- apply repo filter
+- prepend route mention if configured
+
+Verification:
+- add real issue comment
+- confirm final Discord message body in target channel
+
+### 4. GitHub issue closed preset
+
+Input:
+- GitHub webhook `issues.closed`
+- built-in GitHub issue monitor state transition
+
+Behavior:
+- emit `github.issue-closed`
+- route via `github.*`
+- apply repo filter
+- prepend route mention if configured
+
+Verification:
+- close real issue
+- confirm final Discord message body in target channel
+
+### 5. GitHub PR preset family
+
+Input:
+- GitHub webhook `pull_request.*`
+- built-in PR monitor state changes
+- CLI thin client `clawhip github pr-status-changed ...`
+
+Behavior:
+- emit `github.pr-status-changed`
+- route via `github.*`
+- apply repo filter
+- prepend route mention if configured
+
+Verification:
+- open real PR
+- merge / close PR
+- confirm final Discord message body in target channel
+
+### 6. Git commit preset family
+
+Input:
+- built-in git monitor polling local repo
+- CLI thin client `clawhip git commit ...`
+
+Behavior:
+- emit `git.commit`
+- route through git/github family matching
+- preserve repo-based route filtering
+- prepend route mention if configured
+
+Verification:
+- create real empty commit in monitored repo
+- confirm final Discord body contains commit summary and mention
+
+### 7. tmux keyword preset
+
+Input:
+- built-in tmux monitor detects configured keyword
+- CLI thin client `clawhip tmux keyword ...`
+
+Behavior:
+- emit `tmux.keyword`
+- route via `tmux.*`
+- prepend route mention if configured
+
+Verification:
+- print configured keyword in real monitored tmux session
+- confirm final Discord body in target channel
+
+### 8. tmux stale preset
+
+Input:
+- built-in tmux stale detection
+- CLI thin client `clawhip tmux stale ...`
+
+Behavior:
+- emit `tmux.stale`
+- route via `tmux.*`
+- prepend route mention if configured
+
+Verification:
+- let real tmux session idle past threshold
+- confirm final Discord body in target channel
+
+### 9. tmux wrapper preset
+
+Input:
 ```bash
-clawhip status
-```
-
-### Send events via daemon client commands
-
-These commands do **not** talk to Discord directly. They POST to the running daemon.
-
-```bash
-# custom event
-clawhip send --channel 1468539002985644084 --message "Build complete"
-
-# git events
-clawhip git commit \
-  --repo clawhip \
-  --branch main \
-  --commit deadbeefcafebabe \
-  --summary "Ship daemon refactor"
-
-clawhip git branch-changed \
-  --repo clawhip \
-  --old-branch feature/x \
-  --new-branch main
-
-# github events
-clawhip github issue-opened \
-  --repo clawhip \
-  --number 42 \
-  --title "Webhook regression"
-
-clawhip github pr-status-changed \
-  --repo clawhip \
-  --number 77 \
-  --title "Add daemon mode" \
-  --old-status open \
-  --new-status merged \
-  --url https://github.com/Yeachan-Heo/clawhip/pull/77
-
-# tmux event clients
-clawhip tmux keyword \
-  --session issue-1440 \
-  --keyword "PR created" \
-  --line "PR #1453 created"
-
-clawhip tmux stale \
-  --session issue-1440 \
-  --pane 0.0 \
-  --minutes 10 \
-  --last-line "running integration tests"
-```
-
-## Built-in monitoring
-
-The daemon includes built-in monitors configured in `~/.clawhip/config.toml`.
-
-### Git monitoring
-
-The daemon can poll repositories for:
-- new commits
-- branch changes
-- PR status changes
-
-### tmux monitoring
-
-The daemon can monitor tmux sessions for:
-- keyword matches in pane output
-- stale panes with no new output for N minutes
-
-## tmux wrapper
-
-`clawhip tmux new` launches tmux locally, then registers the session with the daemon for monitoring.
-
-```bash
-clawhip tmux new -s issue-2000 \
-  --channel 1468539002985644084 \
-  --mention '<@botid>' \
+clawhip tmux new -s <session> \
+  --channel <id> \
+  --mention '<@id>' \
   --keywords 'error,PR created,FAILED,complete' \
   --stale-minutes 10 \
   --format alert \
-  -- cargo test
+  -- command args
 ```
 
-Wrapper-specific arguments are parsed **before** `--`:
+Behavior:
+- create tmux session
+- register session with daemon
+- daemon monitors keyword/stale events
+- final delivery goes through daemon routing
 
-- `--channel <id>`
-- `--mention <tag>`
-- `--keywords <comma-separated>`
-- `--stale-minutes <n>`
-- `--format <compact|alert|inline>`
-- `-s, --session <name>`
-- `-n, --window-name <name>`
-- `-c, --cwd <dir>`
-- `--attach`
+Verification:
+- run wrapper
+- emit keyword in pane
+- confirm Discord message body and mention
 
-Everything after `--` is passed through to the command running inside tmux.
+### 10. install lifecycle preset
 
-## Webhook API
+Input:
+```bash
+./install.sh
+clawhip install
+clawhip update --restart
+clawhip uninstall --remove-systemd --remove-config
+```
 
-The daemon exposes:
+Behavior:
+- install binary from git clone
+- ensure config dir exists
+- optional systemd install
+- update rebuilds/reinstalls and optionally restarts daemon
+- uninstall removes runtime artifacts
 
-- `GET /health`
-- `GET /api/status`
-- `POST /api/event`
-- `POST /events`
-- `POST /api/tmux/register`
-- `POST /github`
+Verification:
+- `clawhip --help`
+- `clawhip status`
+- `systemctl status clawhip` when systemd-enabled
 
-### GitHub webhook support
+## Preset event families
 
-`POST /github` supports:
-- `issues.opened` -> `github.issue-opened`
-- `pull_request.opened` -> `git.pr-status-changed`
-- `pull_request.reopened` -> `git.pr-status-changed`
-- `pull_request.closed` -> `git.pr-status-changed` with `closed` or `merged`
+### GitHub family
+- `github.issue-opened`
+- `github.issue-commented`
+- `github.issue-closed`
+- `github.pr-status-changed`
 
-## Config
+### Git family
+- `git.commit`
+- `git.branch-changed`
+
+### tmux family
+- `tmux.keyword`
+- `tmux.stale`
+
+## Route contract
 
 Config file:
 
@@ -223,210 +262,110 @@ Config file:
 ~/.clawhip/config.toml
 ```
 
-Example:
+Route model:
 
 ```toml
-[discord]
-bot_token = "your-discord-bot-token"
-
-[daemon]
-bind_host = "0.0.0.0"
-port = 25294
-base_url = "http://127.0.0.1:25294"
-
-[defaults]
-channel = "1468539002985644084"
-format = "compact"
-
-[[routes]]
-event = "github.*"
-filter = { repo = "oh-my-claudecode" }
-channel = "1468539002985644084"
-format = "compact"
-
 [[routes]]
 event = "github.*"
 filter = { repo = "clawhip" }
-channel = "9999999999"
-format = "alert"
-
-[[routes]]
-event = "tmux.*"
-filter = { session = "issue-*" }
-channel = "1468539002985644084"
+channel = "1480171113253175356"
+mention = "<@1465264645320474637>"
 format = "compact"
-
-[monitors]
-poll_interval_secs = 5
-github_api_base = "https://api.github.com"
-# github_token = "optional-token"
-
-[[monitors.git.repos]]
-path = "/home/user/Workspace/clawhip"
-name = "clawhip"
-remote = "origin"
-emit_commits = true
-emit_branch_changes = true
-emit_pr_status = true
-channel = "1468539002985644084"
-format = "compact"
-
-[[monitors.tmux.sessions]]
-session = "issue-*"
-keywords = ["error", "FAILED", "complete", "PR created"]
-stale_minutes = 10
-channel = "1468539002985644084"
-mention = "<@botid>"
-format = "alert"
+allow_dynamic_tokens = false
 ```
 
-## Route filtering
+Resolution rules:
+1. event family match
+2. payload filter match
+3. route channel / format / template / mention applied
+4. default fallback used if route fields absent
 
-Routes support payload-based filters so the same event type can go to different channels.
+## Dynamic token contract
 
-```toml
-[[routes]]
-event = "github.*"
-filter = { repo = "oh-my-claudecode" }
-channel = "1468539002985644084"
-format = "compact"
-
-[[routes]]
-event = "github.*"
-filter = { repo = "clawhip" }
-channel = "9999999999"
-format = "alert"
-
-[[routes]]
-event = "tmux.*"
-filter = { session = "issue-*" }
-channel = "1468539002985644084"
-```
-
-Filter values support glob matching.
-
-## Dynamic template tokens
-
-Route templates can use special tokens, but only when the route explicitly opts in:
+Only for routes with:
 
 ```toml
-[[routes]]
-event = "tmux.*"
-filter = { session = "issue-*" }
-channel = "1468539002985644084"
-format = "alert"
 allow_dynamic_tokens = true
-template = "{session} {keyword}\n{tmux_tail:issue-1456:20}\n{iso_time}"
 ```
 
-Supported dynamic tokens:
-
-- `{sh:git rev-parse --short HEAD}`
-- `{tmux_tail:issue-1456:20}`
-- `{file_tail:/tmp/clawhip.log:30}`
-- `{env:HOSTNAME}`
-- `{now}`
-- `{iso_time}`
-
-Existing payload-field tokens still work as before:
-
+Supported tokens:
 - `{repo}`
 - `{number}`
 - `{title}`
 - `{session}`
 - `{keyword}`
+- `{sh:...}`
+- `{tmux_tail:session:lines}`
+- `{file_tail:/path:lines}`
+- `{env:NAME}`
+- `{now}`
+- `{iso_time}`
 
-### Safety model
+Safety:
+- allowlisted token kinds only
+- route-level opt-in only
+- short timeout
+- output cap
 
-Dynamic tokens are **safe by default**:
+## Install surface
 
-- only the built-in allowlist of token kinds is supported
-- routes must opt in with `allow_dynamic_tokens = true`
-- command/file/tmux token resolution uses a short timeout
-- output is length-capped
-- normal compact/alert behavior is unchanged when no template is used
-
-### Example ops templates
-
-```toml
-[[routes]]
-event = "git.commit"
-filter = { repo = "clawhip" }
-channel = "1468539002985644084"
-allow_dynamic_tokens = true
-template = "{repo} {sh:git -C /home/user/Workspace/clawhip rev-parse --short HEAD} on {env:HOSTNAME}"
-
-[[routes]]
-event = "tmux.*"
-filter = { session = "issue-*" }
-channel = "1468539002985644084"
-allow_dynamic_tokens = true
-template = "{session}: {line}\n--- tail ---\n{tmux_tail:issue-1456:20}"
-
-[[routes]]
-event = "custom"
-channel = "1468539002985644084"
-allow_dynamic_tokens = true
-template = "{message}\n\nrecent log:\n{file_tail:/tmp/clawhip.log:30}"
-```
-
-## Config commands
+### Repo-local install
 
 ```bash
-clawhip config
-clawhip config show
-clawhip config path
+./install.sh
+./install.sh --systemd
 ```
 
-## systemd deployment
+### Runtime lifecycle commands
 
-Repo-root install helper: `install.sh`
+```bash
+clawhip install
+clawhip install --systemd
+clawhip update --restart
+clawhip uninstall
+clawhip uninstall --remove-systemd --remove-config
+```
 
-A ready-to-use unit file is included at:
+## systemd contract
+
+Unit file:
 
 ```text
 deploy/clawhip.service
 ```
 
-Typical install flow:
+Expected install path:
+- copy to `/etc/systemd/system/clawhip.service`
+- `systemctl daemon-reload`
+- `systemctl enable --now clawhip`
 
-```bash
-sudo cp deploy/clawhip.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now clawhip
-sudo systemctl status clawhip
-```
+## Live verification runbook
 
-## Environment variables
-
-- `CLAWHIP_CONFIG`
-- `CLAWHIP_DAEMON_URL`
-- `CLAWHIP_DISCORD_BOT_TOKEN`
-- `CLAWHIP_DISCORD_API_BASE`
-- `CLAWHIP_GITHUB_TOKEN`
-- `CLAWHIP_GIT_BIN`
-- `CLAWHIP_TMUX_BIN`
-
-## Live verification
-
-For operational sign-off of the built-in presets, use real verification instead of mock-only checks.
-
-See:
-
+Use:
 - `docs/live-verification.md`
 - `scripts/live-verify-default-presets.sh`
 
-This covers the live workflows for:
+Required live sign-off presets:
+- issue opened
+- issue commented
+- issue closed
+- PR opened
+- PR status changed
+- PR merged
+- git commit
+- tmux keyword
+- tmux stale
+- tmux wrapper
+- install/update/uninstall
 
-- GitHub issue opened / commented / closed
-- GitHub PR opened / status changed / merged
-- tmux keyword / stale / wrapper paths
-
-## Development
+## Minimal operational commands
 
 ```bash
-cargo fmt
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test
-cargo build
+clawhip                 # start daemon
+clawhip status          # daemon health
+clawhip config          # config management
+clawhip send ...        # thin client custom event
+clawhip github ...      # thin client GitHub event
+clawhip git ...         # thin client git event
+clawhip tmux ...        # thin client / wrapper surface
 ```

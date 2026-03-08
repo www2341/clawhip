@@ -1,83 +1,126 @@
 ---
 name: clawhip
-description: Configure and manage clawhip — the daemon-first event gateway for Discord
+description: Attach/install/use clawhip as a daemon-first notification gateway runtime for OpenClaw / Clawdbot
 ---
 
-# clawhip
+# clawhip skill attachment surface
 
-`clawhip` is a daemon-first notification gateway.
+## Intent
 
-## Essentials
+Use this repo as:
+- executable/runtime repo
+- daemon process for Discord notification routing
+- attachable skill surface for OpenClaw / Clawdbot
 
-- daemon default port: `25294`
-- start daemon: `clawhip` or `clawhip start`
-- check health: `clawhip status`
-- send event through daemon: `clawhip send --channel <id> --message "..."`
-- wrapper mode: `clawhip tmux new -s <session> --channel <id> --keywords error,complete -- command`
+## Primary install flow
 
-## Config
-
-Config file: `~/.clawhip/config.toml`
-
-Key sections:
-- `[discord]`
-- `[daemon]`
-- `[[routes]]`
-- `[[monitors.git.repos]]`
-- `[[monitors.tmux.sessions]]`
-
-## Architecture
+Preferred operator instruction:
 
 ```text
-[CLI clients / webhooks / daemon monitors] -> [clawhip daemon :25294] -> [route filters] -> [Discord REST API]
+@openclaw install https://github.com/Yeachan-Heo/clawhip
 ```
 
-## Dynamic templates
+Expected automation flow:
 
-Routes can opt into special dynamic tokens with `allow_dynamic_tokens = true`.
+1. clone repo
+2. run `./install.sh`
+3. read this `SKILL.md`
+4. attach skill
+5. scaffold `~/.clawhip/config.toml`
+6. start daemon
+7. run live verification presets
 
-Examples:
+## Runtime surface
 
-```toml
-[[routes]]
-event = "tmux.*"
-channel = "1468539002985644084"
-allow_dynamic_tokens = true
-template = "{session}\n{tmux_tail:issue-1456:20}\n{iso_time}"
+Default daemon URL:
+
+```text
+http://127.0.0.1:25294
 ```
 
-Supported dynamic tokens:
-- `{sh:...}`
-- `{tmux_tail:session:lines}`
-- `{file_tail:/path/to/file:lines}`
-- `{env:NAME}`
-- `{now}`
-- `{iso_time}`
+Core commands:
 
-Safety:
-- route-level opt-in only
-- allowlisted token kinds only
-- short timeout
-- output capped
+```bash
+clawhip
+clawhip start
+clawhip status
+clawhip config
+clawhip send --channel <id> --message "..."
+clawhip github issue-opened ...
+clawhip github pr-status-changed ...
+clawhip git commit ...
+clawhip tmux keyword ...
+clawhip tmux stale ...
+clawhip tmux new -s <session> --channel <id> --keywords error,complete -- command
+```
 
-## Lifecycle commands
+## Lifecycle surface
 
 ```bash
 clawhip install
 clawhip install --systemd
 clawhip update --restart
 clawhip uninstall --remove-systemd --remove-config
-```
-
-Repo helper:
-
-```bash
+./install.sh
 ./install.sh --systemd
 ```
 
-## Live verification
+## Config scaffold expectations
 
-Use the operational runbook and helper script:
+Key sections:
+- `[discord]`
+- `[daemon]`
+- `[defaults]`
+- `[[routes]]`
+- `[monitors]`
+- `[[monitors.git.repos]]`
+- `[[monitors.tmux.sessions]]`
 
+Typical preset route:
+
+```toml
+[[routes]]
+event = "github.*"
+filter = { repo = "clawhip" }
+channel = "1480171113253175356"
+mention = "<@1465264645320474637>"
+format = "compact"
+```
+
+## Dynamic template opt-in
+
+```toml
+[[routes]]
+event = "tmux.*"
+allow_dynamic_tokens = true
+template = "{session}\n{tmux_tail:issue-1456:20}\n{iso_time}"
+```
+
+Allowed dynamic tokens:
+- `{sh:...}`
+- `{tmux_tail:session:lines}`
+- `{file_tail:/path:lines}`
+- `{env:NAME}`
+- `{now}`
+- `{iso_time}`
+
+## Verification surface
+
+Use the live operational runbook:
 - `docs/live-verification.md`
 - `scripts/live-verify-default-presets.sh`
+
+Preset verification targets:
+- GitHub issue opened / commented / closed
+- GitHub PR opened / status changed / merged
+- git commit monitor
+- tmux keyword / stale / wrapper
+- install / update / uninstall
+
+## Attachment summary
+
+```text
+repo = runtime
+SKILL.md = attach/install/usage contract
+README.md = operational spec for agents
+```

@@ -1,5 +1,9 @@
 # clawhip
 
+<p align="center">
+  <img src="assets/clawhip-mascot.jpg" width="400" alt="clawhip mascot" />
+</p>
+
 This is a standalone Discord bot / system daemon that whips your claw into organized contextual notifications.
 
 Human install pitch:

@@ -5,33 +5,45 @@
 <h1 align="center">🦞🔥 clawhip</h1>
 
 <p align="center">
-  <strong>claw + whip</strong> — standalone event-to-channel notification router<br>
-  <em>The daemon that whips your clawdbot into shape.</em>
-</p>
-
-<p align="center">
-  <a href="#features">Features</a> •
-  <a href="#install">Install</a> •
-  <a href="#usage">Usage</a> •
-  <a href="#config">Config</a>
+  <strong>claw + whip</strong> — standalone event gateway to Discord<br>
+  <em>All events come in through CLI or webhooks, then route to channels.</em>
 </p>
 
 ---
 
-## What is clawhip?
+## Core architecture
 
-**clawhip** is a standalone notification router that takes events from CLI commands, stdin, and HTTP webhooks, then posts them directly to Discord channels through the Discord REST API.
+`clawhip` is a **gateway**, not a plugin and not a Discord gateway client.
 
-It is an independent bot: **no clawdbot plugin, no Discord gateway integration, no shared session state**. You give it its own bot token, route rules, and output formats.
+The model is:
+
+```text
+[external hook / cron / wrapper / webhook] -> [clawhip CLI or HTTP] -> [route matching] -> [Discord REST API]
+```
+
+That means:
+
+- no clawdbot plugin integration
+- no internal git polling daemon
+- no internal tmux watch daemon
+- git and tmux integrations are provided as **ready-to-use scripts** under `integrations/`
+- `clawhip tmux new ... -- command` is a built-in wrapper for launching a tmux session with monitoring
 
 ## Features
 
-- 🔔 **Event routing** — `custom`, `github issue-opened`, `tmux keyword`, stdin JSON, and HTTP webhooks
-- 💬 **Discord delivery** — Direct REST API via `reqwest`
-- ⚙️ **CLI-first** — Single Rust binary with explicit subcommands
-- 📋 **Flexible formats** — `compact`, `alert`, `inline`, `raw` per-route
-- 🌐 **Webhook server** — `clawhip serve` exposes `/health`, `/events`, and `/github`
-- 🛠️ **Interactive config editor** — `clawhip config` manages token/defaults/routes in `~/.clawhip/config.toml`
+- `clawhip custom --channel <id> --message <text>`
+- `clawhip git commit ...`
+- `clawhip git branch-changed ...`
+- `clawhip github issue-opened ...`
+- `clawhip github pr-status-changed ...`
+- `clawhip tmux keyword ...`
+- `clawhip tmux stale ...`
+- `clawhip tmux new -s session --channel ... --keywords ... --stale-minutes ... -- command args`
+- `clawhip stdin`
+- `clawhip serve --port 8765`
+- `clawhip config`
+- route filters with payload-field matching and glob support
+- Discord delivery via `reqwest`
 
 ## Install
 
@@ -39,42 +51,96 @@ It is an independent bot: **no clawdbot plugin, no Discord gateway integration, 
 cargo install --path .
 ```
 
-## Usage
+## Basic usage
 
 ```bash
-# Send a custom notification
-clawhip custom --channel 1468539002985644084 --message "Build complete! 🟢"
+# Custom notification
+clawhip custom --channel 1468539002985644084 --message "Build complete"
+
+# Git commit event
+clawhip git commit \
+  --repo clawhip \
+  --branch main \
+  --commit deadbeefcafebabe \
+  --summary "Ship gateway prototype"
 
 # GitHub issue-opened event
 clawhip github issue-opened \
-  --repo oh-my-claudecode \
-  --number 1460 \
-  --title "Bug in setup"
+  --repo clawhip \
+  --number 42 \
+  --title "Webhook regression"
 
-# tmux keyword detection
+# Pull-request status event
+clawhip github pr-status-changed \
+  --repo clawhip \
+  --number 77 \
+  --title "Add tmux wrapper" \
+  --old-status open \
+  --new-status merged \
+  --url https://github.com/bellman/clawhip/pull/77
+
+# tmux keyword event
 clawhip tmux keyword \
   --session issue-1440 \
   --keyword "PR created" \
-  --line "PR #1453 merged"
+  --line "PR #1453 created"
 
-# Pipe a single JSON event
-printf '%s\n' '{"type":"custom","channel":"1468539002985644084","message":"Hello!"}' | clawhip stdin
-
-# Pipe newline-delimited JSON events
-printf '%s\n%s\n' \
-  '{"type":"custom","message":"first"}' \
-  '{"type":"custom","message":"second"}' | clawhip stdin
-
-# Start the webhook server
-clawhip serve --port 8765
-
-# Interactive config editor
-clawhip config
-
-# Inspect config
-clawhip config show
-clawhip config path
+# tmux stale event
+clawhip tmux stale \
+  --session issue-1440 \
+  --pane 0.0 \
+  --minutes 10 \
+  --last-line "running integration tests"
 ```
+
+## tmux wrapper mode
+
+`clawhip tmux new` launches a tmux session and monitors its pane output for keywords and staleness.
+
+```bash
+clawhip tmux new -s issue-2000 \
+  --channel 1468539002985644084 \
+  --mention '<@botid>' \
+  --keywords 'error,PR created,FAILED,complete' \
+  --stale-minutes 10 \
+  --format alert \
+  -- cargo test
+```
+
+### Wrapper argument model
+
+Arguments **before** `--` are clawhip/tmux wrapper options parsed by Clap:
+
+- `-s, --session <name>`
+- `--channel <id>`
+- `--mention <tag>`
+- `--keywords <comma-separated>`
+- `--stale-minutes <n>`
+- `--format <compact|alert|inline>`
+- `-n, --window-name <name>`
+- `-c, --cwd <dir>`
+- `--attach`
+
+Arguments **after** `--` are passed through as the command to run inside tmux.
+
+## HTTP webhook gateway
+
+```bash
+clawhip serve --port 8765
+```
+
+Endpoints:
+
+- `GET /health`
+- `POST /events` — generic JSON events
+- `POST /github` — GitHub `issues` and `pull_request` events
+
+Supported GitHub webhook mappings:
+
+- `issues.opened` -> `github.issue-opened`
+- `pull_request.opened` -> `git.pr-status-changed` (`<new>` -> `open`)
+- `pull_request.reopened` -> `git.pr-status-changed` (`closed` -> `open`)
+- `pull_request.closed` -> `git.pr-status-changed` (`open` -> `closed` or `merged`)
 
 ## Config
 
@@ -90,57 +156,54 @@ bot_token = "your-discord-bot-token"
 channel = "1468539002985644084"
 format = "compact"
 
-[routes.custom]
+[[routes]]
+event = "github.*"
+filter = { repo = "oh-my-claudecode" }
 channel = "1468539002985644084"
-format = "inline"
+format = "compact"
 
-[routes."github.issue-opened"]
-channel = "1468539002985644084"
+[[routes]]
+event = "github.*"
+filter = { repo = "clawhip" }
+channel = "9999999999"
 format = "alert"
-template = "🚨 {repo} #{number}: {title}"
 
-[routes."tmux.keyword"]
+[[routes]]
+event = "tmux.*"
+filter = { session = "issue-*" }
+channel = "1468539002985644084"
 format = "compact"
 ```
 
-Environment overrides:
+### Route filtering
 
-- `CLAWHIP_CONFIG` — override the config file path
-- `CLAWHIP_DISCORD_BOT_TOKEN` — override the Discord bot token
-- `CLAWHIP_DISCORD_API_BASE` — override the Discord API base URL (useful for tests)
+Routes are evaluated in config order. A route matches when:
 
-### Route behavior
+1. `event` glob matches the event type, and
+2. every `filter` entry matches the corresponding payload field
 
-Route resolution precedence:
+Filter values support glob patterns, so this works:
 
-1. Explicit event `channel`
-2. Matching route `channel`
-3. Global default `defaults.channel`
+```toml
+[[routes]]
+event = "tmux.*"
+filter = { session = "issue-*" }
+channel = "1468539002985644084"
+```
 
-Format resolution precedence:
+That lets the same event type route to different channels based on payload fields like `repo`, `session`, `branch`, etc.
 
-1. Explicit event `format`
-2. Matching route `format`
-3. Global default `defaults.format`
+### Environment overrides
 
-Template resolution precedence:
+- `CLAWHIP_CONFIG`
+- `CLAWHIP_DISCORD_BOT_TOKEN`
+- `CLAWHIP_DISCORD_API_BASE`
+- `CLAWHIP_TMUX_BIN`
+- `CLAWHIP_TMUX_POLL_SECS`
 
-1. Explicit event `template`
-2. Matching route `template`
-3. Built-in formatter for the event kind
+## JSON event gateway
 
-### Message formats
-
-| Format | Use Case | Example |
-|--------|----------|---------|
-| `compact` | Routine updates | `bellman/clawhip#17 opened: Webhook test` |
-| `alert` | Failures / urgent events | `🚨 tmux session issue-1440 hit keyword 'panic': stack trace...` |
-| `inline` | Dense channel output | `[GitHub] bellman/clawhip#17 Webhook test` |
-| `raw` | Debugging / passthrough | Pretty-printed JSON payload |
-
-## Event JSON
-
-`clawhip stdin` and `POST /events` accept either a `payload` object or flat event-specific fields.
+`clawhip stdin` and `POST /events` accept flat or payload-style JSON.
 
 Flat example:
 
@@ -156,38 +219,56 @@ Payload example:
 
 ```json
 {
-  "type": "github.issue-opened",
+  "type": "git.commit",
   "payload": {
-    "repo": "bellman/clawhip",
-    "number": 17,
-    "title": "Webhook test"
+    "repo": "clawhip",
+    "branch": "main",
+    "commit": "deadbeefcafebabe",
+    "summary": "Ship gateway prototype"
   }
 }
 ```
 
-## HTTP server
+## integrations/
 
-- `GET /health`
-- `POST /events` — accepts the same event JSON as `stdin`
-- `POST /github` — accepts GitHub `issues` webhook payloads and routes `action=opened` as `github.issue-opened`
+Ready-to-use examples live in `integrations/`:
 
-## Architecture
+### Git
 
-```text
-[CLI/stdin/webhooks] -> [event parsing] -> [route resolution + formatting] -> [Discord REST API] -> [channel]
+- `integrations/git/post-commit.sh`
+- `integrations/git/post-checkout.sh`
+- `integrations/git/install-hooks.sh`
+
+Install example hooks into the current repo:
+
+```bash
+cd /path/to/repo
+/path/to/clawhip/integrations/git/install-hooks.sh
 ```
 
-No gateway. No clawdbot plugin boundary. Just events in and messages out.
+Optional channel override:
+
+```bash
+export CLAWHIP_CHANNEL=1468539002985644084
+```
+
+### tmux
+
+- `integrations/tmux/notify-keyword.sh`
+- `integrations/tmux/scan-keywords.sh`
+- `integrations/tmux/stale-check.sh`
+
+Example cron entries:
+
+```cron
+* * * * * /path/to/clawhip/integrations/tmux/scan-keywords.sh --session issue-1440 --keywords error,FAILED,complete --channel 1468539002985644084
+* * * * * /path/to/clawhip/integrations/tmux/stale-check.sh --session issue-1440 --stale-minutes 10 --channel 1468539002985644084
+```
 
 ## Development
 
 ```bash
 cargo fmt
-cargo clippy --all-targets --all-features -- -D warnings
 cargo test
 cargo build
 ```
-
-## License
-
-MIT

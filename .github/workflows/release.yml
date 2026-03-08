@@ -295,7 +295,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Publish to crates.io
-        run: cargo publish --no-verify
+        run: cargo publish --no-verify --allow-dirty
 
   announce:
     needs:

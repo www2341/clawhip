@@ -59,6 +59,23 @@ pub enum Commands {
         #[command(subcommand)]
         command: TmuxCommands,
     },
+    /// Install clawhip from the current git clone.
+    Install {
+        #[arg(long, default_value_t = false)]
+        systemd: bool,
+    },
+    /// Update clawhip from the current git clone.
+    Update {
+        #[arg(long, default_value_t = false)]
+        restart: bool,
+    },
+    /// Uninstall clawhip.
+    Uninstall {
+        #[arg(long, default_value_t = false)]
+        remove_systemd: bool,
+        #[arg(long, default_value_t = false)]
+        remove_config: bool,
+    },
     /// Manage configuration.
     Config {
         #[command(subcommand)]

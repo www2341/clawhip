@@ -5,6 +5,7 @@ mod daemon;
 mod discord;
 mod dynamic_tokens;
 mod events;
+mod lifecycle;
 mod monitor;
 mod router;
 mod tmux_wrapper;
@@ -90,6 +91,12 @@ async fn real_main() -> Result<()> {
             };
             client.send_event(&event).await
         }
+        Commands::Install { systemd } => lifecycle::install(systemd),
+        Commands::Update { restart } => lifecycle::update(restart),
+        Commands::Uninstall {
+            remove_systemd,
+            remove_config,
+        } => lifecycle::uninstall(remove_systemd, remove_config),
         Commands::Tmux { command } => match command {
             TmuxCommands::Keyword {
                 session,

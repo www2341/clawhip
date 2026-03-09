@@ -98,6 +98,142 @@ impl IncomingEvent {
         }
     }
 
+    fn agent_event(
+        kind: &str,
+        status: &str,
+        agent_name: String,
+        session_id: Option<String>,
+        project: Option<String>,
+        elapsed_secs: Option<u64>,
+        summary: Option<String>,
+        error_message: Option<String>,
+        mention: Option<String>,
+        channel: Option<String>,
+    ) -> Self {
+        let mut payload = Map::new();
+        payload.insert("agent_name".to_string(), json!(agent_name));
+        payload.insert("status".to_string(), json!(status));
+        if let Some(session_id) = session_id {
+            payload.insert("session_id".to_string(), json!(session_id));
+        }
+        if let Some(project) = project {
+            payload.insert("project".to_string(), json!(project));
+        }
+        if let Some(elapsed_secs) = elapsed_secs {
+            payload.insert("elapsed_secs".to_string(), json!(elapsed_secs));
+        }
+        if let Some(summary) = summary {
+            payload.insert("summary".to_string(), json!(summary));
+        }
+        if let Some(error_message) = error_message {
+            payload.insert("error_message".to_string(), json!(error_message));
+        }
+        if let Some(mention) = mention {
+            payload.insert("mention".to_string(), json!(mention));
+        }
+
+        Self {
+            kind: kind.to_string(),
+            channel,
+            format: None,
+            template: None,
+            payload: Value::Object(payload),
+        }
+    }
+
+    pub fn agent_started(
+        agent_name: String,
+        session_id: Option<String>,
+        project: Option<String>,
+        elapsed_secs: Option<u64>,
+        summary: Option<String>,
+        mention: Option<String>,
+        channel: Option<String>,
+    ) -> Self {
+        Self::agent_event(
+            "agent.started",
+            "started",
+            agent_name,
+            session_id,
+            project,
+            elapsed_secs,
+            summary,
+            None,
+            mention,
+            channel,
+        )
+    }
+
+    pub fn agent_blocked(
+        agent_name: String,
+        session_id: Option<String>,
+        project: Option<String>,
+        elapsed_secs: Option<u64>,
+        summary: Option<String>,
+        mention: Option<String>,
+        channel: Option<String>,
+    ) -> Self {
+        Self::agent_event(
+            "agent.blocked",
+            "blocked",
+            agent_name,
+            session_id,
+            project,
+            elapsed_secs,
+            summary,
+            None,
+            mention,
+            channel,
+        )
+    }
+
+    pub fn agent_finished(
+        agent_name: String,
+        session_id: Option<String>,
+        project: Option<String>,
+        elapsed_secs: Option<u64>,
+        summary: Option<String>,
+        mention: Option<String>,
+        channel: Option<String>,
+    ) -> Self {
+        Self::agent_event(
+            "agent.finished",
+            "finished",
+            agent_name,
+            session_id,
+            project,
+            elapsed_secs,
+            summary,
+            None,
+            mention,
+            channel,
+        )
+    }
+
+    pub fn agent_failed(
+        agent_name: String,
+        session_id: Option<String>,
+        project: Option<String>,
+        elapsed_secs: Option<u64>,
+        summary: Option<String>,
+        error_message: String,
+        mention: Option<String>,
+        channel: Option<String>,
+    ) -> Self {
+        Self::agent_event(
+            "agent.failed",
+            "failed",
+            agent_name,
+            session_id,
+            project,
+            elapsed_secs,
+            summary,
+            Some(error_message),
+            mention,
+            channel,
+        )
+    }
+
     pub fn github_issue_opened(
         repo: String,
         number: u64,
@@ -267,6 +403,39 @@ impl IncomingEvent {
             }
             ("custom", MessageFormat::Alert) => format!("🚨 {}", string_field(payload, "message")?),
             ("custom", MessageFormat::Raw) => serde_json::to_string_pretty(payload)?,
+
+            ("agent.started", MessageFormat::Compact)
+            | ("agent.blocked", MessageFormat::Compact)
+            | ("agent.finished", MessageFormat::Compact)
+            | ("agent.failed", MessageFormat::Compact) => format!(
+                "{}agent {}{}",
+                agent_optional_mention_prefix(payload),
+                string_field(payload, "agent_name")?,
+                agent_detail_suffix(payload)
+            ),
+            ("agent.started", MessageFormat::Alert)
+            | ("agent.blocked", MessageFormat::Alert)
+            | ("agent.finished", MessageFormat::Alert)
+            | ("agent.failed", MessageFormat::Alert) => format!(
+                "🚨 {}agent {}{}",
+                agent_optional_mention_prefix(payload),
+                string_field(payload, "agent_name")?,
+                agent_detail_suffix(payload)
+            ),
+            ("agent.started", MessageFormat::Inline)
+            | ("agent.blocked", MessageFormat::Inline)
+            | ("agent.finished", MessageFormat::Inline)
+            | ("agent.failed", MessageFormat::Inline) => format!(
+                "{}[agent:{}] {}{}",
+                agent_optional_mention_prefix(payload),
+                string_field(payload, "agent_name")?,
+                string_field(payload, "status")?,
+                agent_inline_suffix(payload)
+            ),
+            ("agent.started", MessageFormat::Raw)
+            | ("agent.blocked", MessageFormat::Raw)
+            | ("agent.finished", MessageFormat::Raw)
+            | ("agent.failed", MessageFormat::Raw) => serde_json::to_string_pretty(payload)?,
 
             ("github.issue-opened", MessageFormat::Compact) => format!(
                 "{}#{} opened: {}",
@@ -473,8 +642,76 @@ fn string_field(payload: &Value, key: &str) -> Result<String> {
     payload
         .get(key)
         .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
         .map(ToString::to_string)
         .ok_or_else(|| format!("missing string field '{key}'").into())
+}
+
+fn optional_string_field(payload: &Value, key: &str) -> Option<String> {
+    payload
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn optional_u64_field(payload: &Value, key: &str) -> Option<u64> {
+    payload.get(key).and_then(Value::as_u64)
+}
+
+fn agent_optional_mention_prefix(payload: &Value) -> String {
+    optional_string_field(payload, "mention")
+        .map(|mention| format!("{mention} "))
+        .unwrap_or_default()
+}
+
+fn agent_context_parts(payload: &Value) -> Vec<String> {
+    let mut parts = Vec::new();
+
+    if let Some(project) = optional_string_field(payload, "project") {
+        parts.push(format!("project={project}"));
+    }
+    if let Some(session_id) = optional_string_field(payload, "session_id") {
+        parts.push(format!("session={session_id}"));
+    }
+    if let Some(elapsed_secs) = optional_u64_field(payload, "elapsed_secs") {
+        parts.push(format!("elapsed={elapsed_secs}s"));
+    }
+
+    parts
+}
+
+fn agent_detail_suffix(payload: &Value) -> String {
+    let mut parts = vec![string_field(payload, "status").unwrap_or_default()];
+    parts.extend(agent_context_parts(payload));
+
+    if let Some(summary) = optional_string_field(payload, "summary") {
+        parts.push(format!("summary={summary}"));
+    }
+    if let Some(error_message) = optional_string_field(payload, "error_message") {
+        parts.push(format!("error={error_message}"));
+    }
+
+    format!(" ({})", parts.join(", "))
+}
+
+fn agent_inline_suffix(payload: &Value) -> String {
+    let mut parts = agent_context_parts(payload);
+
+    if let Some(summary) = optional_string_field(payload, "summary") {
+        parts.push(summary);
+    }
+    if let Some(error_message) = optional_string_field(payload, "error_message") {
+        parts.push(format!("error: {error_message}"));
+    }
+
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!(" · {}", parts.join(" · "))
+    }
 }
 
 fn short_sha(commit: &str) -> String {
@@ -529,11 +766,203 @@ impl ValueExt for Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn renders_template_from_payload() {
         let event = IncomingEvent::github_issue_opened("repo".into(), 42, "broken".into(), None);
         let rendered = render_template("{repo} #{number}: {title}", &event.template_context());
         assert_eq!(rendered, "repo #42: broken");
+    }
+
+    #[test]
+    fn constructs_agent_events_with_expected_payload_fields() {
+        let started = IncomingEvent::agent_started(
+            "worker-1".into(),
+            Some("sess-123".into()),
+            Some("my-repo".into()),
+            None,
+            Some("booted".into()),
+            Some("<@123>".into()),
+            Some("alerts".into()),
+        );
+        assert_eq!(started.kind, "agent.started");
+        assert_eq!(started.channel.as_deref(), Some("alerts"));
+        assert_eq!(started.payload["agent_name"], json!("worker-1"));
+        assert_eq!(started.payload["session_id"], json!("sess-123"));
+        assert_eq!(started.payload["project"], json!("my-repo"));
+        assert_eq!(started.payload["status"], json!("started"));
+        assert_eq!(started.payload["summary"], json!("booted"));
+        assert_eq!(started.payload["mention"], json!("<@123>"));
+        assert_eq!(started.payload["elapsed_secs"], json!(null));
+        assert_eq!(started.payload["error_message"], json!(null));
+
+        let failed = IncomingEvent::agent_failed(
+            "worker-2".into(),
+            None,
+            Some("my-repo".into()),
+            Some(17),
+            Some("compile step".into()),
+            "build failed".into(),
+            None,
+            None,
+        );
+        assert_eq!(failed.kind, "agent.failed");
+        assert_eq!(failed.payload["status"], json!("failed"));
+        assert_eq!(failed.payload["elapsed_secs"], json!(17));
+        assert_eq!(failed.payload["error_message"], json!("build failed"));
+    }
+
+    #[test]
+    fn renders_agent_started_in_all_formats() {
+        let event = IncomingEvent::agent_started(
+            "worker-1".into(),
+            Some("sess-123".into()),
+            Some("my-repo".into()),
+            None,
+            Some("session began".into()),
+            Some("<@123>".into()),
+            None,
+        );
+
+        assert_eq!(
+            event.render_default(&MessageFormat::Compact).unwrap(),
+            "<@123> agent worker-1 (started, project=my-repo, session=sess-123, summary=session began)"
+        );
+        assert_eq!(
+            event.render_default(&MessageFormat::Alert).unwrap(),
+            "🚨 <@123> agent worker-1 (started, project=my-repo, session=sess-123, summary=session began)"
+        );
+        assert_eq!(
+            event.render_default(&MessageFormat::Inline).unwrap(),
+            "<@123> [agent:worker-1] started · project=my-repo · session=sess-123 · session began"
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&event.render_default(&MessageFormat::Raw).unwrap())
+                .unwrap(),
+            json!({
+                "agent_name": "worker-1",
+                "session_id": "sess-123",
+                "project": "my-repo",
+                "status": "started",
+                "summary": "session began",
+                "mention": "<@123>"
+            })
+        );
+    }
+
+    #[test]
+    fn renders_agent_blocked_in_all_formats() {
+        let event = IncomingEvent::agent_blocked(
+            "worker-1".into(),
+            Some("sess-123".into()),
+            Some("my-repo".into()),
+            None,
+            Some("waiting for review".into()),
+            None,
+            None,
+        );
+
+        assert_eq!(
+            event.render_default(&MessageFormat::Compact).unwrap(),
+            "agent worker-1 (blocked, project=my-repo, session=sess-123, summary=waiting for review)"
+        );
+        assert_eq!(
+            event.render_default(&MessageFormat::Alert).unwrap(),
+            "🚨 agent worker-1 (blocked, project=my-repo, session=sess-123, summary=waiting for review)"
+        );
+        assert_eq!(
+            event.render_default(&MessageFormat::Inline).unwrap(),
+            "[agent:worker-1] blocked · project=my-repo · session=sess-123 · waiting for review"
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&event.render_default(&MessageFormat::Raw).unwrap())
+                .unwrap(),
+            json!({
+                "agent_name": "worker-1",
+                "session_id": "sess-123",
+                "project": "my-repo",
+                "status": "blocked",
+                "summary": "waiting for review"
+            })
+        );
+    }
+
+    #[test]
+    fn renders_agent_finished_in_all_formats() {
+        let event = IncomingEvent::agent_finished(
+            "worker-1".into(),
+            Some("sess-123".into()),
+            Some("my-repo".into()),
+            Some(300),
+            Some("PR created".into()),
+            None,
+            None,
+        );
+
+        assert_eq!(
+            event.render_default(&MessageFormat::Compact).unwrap(),
+            "agent worker-1 (finished, project=my-repo, session=sess-123, elapsed=300s, summary=PR created)"
+        );
+        assert_eq!(
+            event.render_default(&MessageFormat::Alert).unwrap(),
+            "🚨 agent worker-1 (finished, project=my-repo, session=sess-123, elapsed=300s, summary=PR created)"
+        );
+        assert_eq!(
+            event.render_default(&MessageFormat::Inline).unwrap(),
+            "[agent:worker-1] finished · project=my-repo · session=sess-123 · elapsed=300s · PR created"
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&event.render_default(&MessageFormat::Raw).unwrap())
+                .unwrap(),
+            json!({
+                "agent_name": "worker-1",
+                "session_id": "sess-123",
+                "project": "my-repo",
+                "status": "finished",
+                "elapsed_secs": 300,
+                "summary": "PR created"
+            })
+        );
+    }
+
+    #[test]
+    fn renders_agent_failed_in_all_formats() {
+        let event = IncomingEvent::agent_failed(
+            "worker-1".into(),
+            Some("sess-123".into()),
+            Some("my-repo".into()),
+            Some(17),
+            Some("after test run".into()),
+            "build failed".into(),
+            None,
+            None,
+        );
+
+        assert_eq!(
+            event.render_default(&MessageFormat::Compact).unwrap(),
+            "agent worker-1 (failed, project=my-repo, session=sess-123, elapsed=17s, summary=after test run, error=build failed)"
+        );
+        assert_eq!(
+            event.render_default(&MessageFormat::Alert).unwrap(),
+            "🚨 agent worker-1 (failed, project=my-repo, session=sess-123, elapsed=17s, summary=after test run, error=build failed)"
+        );
+        assert_eq!(
+            event.render_default(&MessageFormat::Inline).unwrap(),
+            "[agent:worker-1] failed · project=my-repo · session=sess-123 · elapsed=17s · after test run · error: build failed"
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&event.render_default(&MessageFormat::Raw).unwrap())
+                .unwrap(),
+            json!({
+                "agent_name": "worker-1",
+                "session_id": "sess-123",
+                "project": "my-repo",
+                "status": "failed",
+                "elapsed_secs": 17,
+                "summary": "after test run",
+                "error_message": "build failed"
+            })
+        );
     }
 }

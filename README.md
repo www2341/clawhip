@@ -244,7 +244,29 @@ Verification:
 - create real empty commit in monitored repo
 - confirm final Discord body contains commit summary and mention
 
-### 7. tmux keyword preset
+### 7. Agent lifecycle preset family
+
+Input:
+```bash
+clawhip agent started --name worker-1 --session sess-123 --project my-repo
+clawhip agent blocked --name worker-1 --summary "waiting for review"
+clawhip agent finished --name worker-1 --elapsed 300 --summary "PR created"
+clawhip agent failed --name worker-1 --error "build failed"
+```
+
+Behavior:
+- emit `agent.started`, `agent.blocked`, `agent.finished`, or `agent.failed`
+- route via `agent.*`
+- apply optional project/session filters
+- include status / elapsed / summary / error details in rendered messages
+- prepend route mention if configured
+
+Verification:
+- send each CLI event against a running daemon
+- confirm final Discord body contains agent name and lifecycle state
+- confirm `agent.*` route rules match each event type
+
+### 8. tmux keyword preset
 
 Input:
 - built-in tmux monitor detects configured keyword
@@ -259,7 +281,7 @@ Verification:
 - print configured keyword in real monitored tmux session
 - confirm final Discord body in target channel
 
-### 8. tmux stale preset
+### 9. tmux stale preset
 
 Input:
 - built-in tmux stale detection
@@ -274,7 +296,7 @@ Verification:
 - let real tmux session idle past threshold
 - confirm final Discord body in target channel
 
-### 9. tmux wrapper / watch preset
+### 10. tmux wrapper / watch preset
 
 Input:
 ```bash
@@ -308,7 +330,7 @@ Verification:
 - emit keyword in pane
 - confirm Discord message body and mention
 
-### 10. install lifecycle preset
+### 11. install lifecycle preset
 
 Input:
 ```bash
@@ -342,6 +364,12 @@ Verification:
 - `git.commit`
 - `git.branch-changed`
 
+### Agent family
+- `agent.started`
+- `agent.blocked`
+- `agent.finished`
+- `agent.failed`
+
 ### tmux family
 - `tmux.keyword`
 - `tmux.stale`
@@ -363,6 +391,13 @@ filter = { repo = "clawhip" }
 channel = "1480171113253175356"
 mention = "<@1465264645320474637>"
 format = "compact"
+allow_dynamic_tokens = false
+
+[[routes]]
+event = "agent.*"
+filter = { project = "clawhip" }
+channel = "1480171113253175356"
+format = "alert"
 allow_dynamic_tokens = false
 ```
 
@@ -465,6 +500,7 @@ Required live sign-off presets:
 - PR status changed
 - PR merged
 - git commit
+- agent started / blocked / finished / failed
 - tmux keyword
 - tmux stale
 - tmux wrapper
@@ -480,6 +516,7 @@ clawhip config          # config management
 clawhip send ...        # thin client custom event
 clawhip github ...      # thin client GitHub event
 clawhip git ...         # thin client git event
+clawhip agent ...       # thin client agent lifecycle event
 clawhip tmux ...        # thin client / wrapper surface
 ```
 

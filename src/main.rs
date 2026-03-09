@@ -14,7 +14,9 @@ use std::sync::Arc;
 
 use clap::Parser;
 
-use crate::cli::{Cli, Commands, ConfigCommand, GitCommands, GithubCommands, TmuxCommands};
+use crate::cli::{
+    AgentCommands, Cli, Commands, ConfigCommand, GitCommands, GithubCommands, TmuxCommands,
+};
 use crate::client::DaemonClient;
 use crate::config::AppConfig;
 use crate::events::IncomingEvent;
@@ -89,6 +91,49 @@ async fn real_main() -> Result<()> {
                     channel,
                 } => IncomingEvent::github_pr_status_changed(
                     repo, number, title, old_status, new_status, url, channel,
+                ),
+            };
+            client.send_event(&event).await
+        }
+        Commands::Agent { command } => {
+            let client = DaemonClient::from_config(config.as_ref());
+            let event = match command {
+                AgentCommands::Started(args) => IncomingEvent::agent_started(
+                    args.agent_name,
+                    args.session_id,
+                    args.project,
+                    args.elapsed_secs,
+                    args.summary,
+                    args.mention,
+                    args.channel,
+                ),
+                AgentCommands::Blocked(args) => IncomingEvent::agent_blocked(
+                    args.agent_name,
+                    args.session_id,
+                    args.project,
+                    args.elapsed_secs,
+                    args.summary,
+                    args.mention,
+                    args.channel,
+                ),
+                AgentCommands::Finished(args) => IncomingEvent::agent_finished(
+                    args.agent_name,
+                    args.session_id,
+                    args.project,
+                    args.elapsed_secs,
+                    args.summary,
+                    args.mention,
+                    args.channel,
+                ),
+                AgentCommands::Failed(args) => IncomingEvent::agent_failed(
+                    args.event.agent_name,
+                    args.event.session_id,
+                    args.event.project,
+                    args.event.elapsed_secs,
+                    args.event.summary,
+                    args.error_message,
+                    args.event.mention,
+                    args.event.channel,
                 ),
             };
             client.send_event(&event).await

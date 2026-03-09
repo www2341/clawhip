@@ -54,6 +54,11 @@ pub enum Commands {
         #[command(subcommand)]
         command: GithubCommands,
     },
+    /// Send agent lifecycle events to the local daemon.
+    Agent {
+        #[command(subcommand)]
+        command: AgentCommands,
+    },
     /// Send tmux-related events to the local daemon or launch/register tmux sessions.
     Tmux {
         #[command(subcommand)]
@@ -137,6 +142,40 @@ pub enum GithubCommands {
         #[arg(long)]
         channel: Option<String>,
     },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum AgentCommands {
+    Started(AgentEventArgs),
+    Blocked(AgentEventArgs),
+    Finished(AgentEventArgs),
+    Failed(AgentFailedArgs),
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct AgentEventArgs {
+    #[arg(long = "name")]
+    pub agent_name: String,
+    #[arg(long = "session")]
+    pub session_id: Option<String>,
+    #[arg(long)]
+    pub project: Option<String>,
+    #[arg(long = "elapsed")]
+    pub elapsed_secs: Option<u64>,
+    #[arg(long)]
+    pub summary: Option<String>,
+    #[arg(long)]
+    pub mention: Option<String>,
+    #[arg(long)]
+    pub channel: Option<String>,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct AgentFailedArgs {
+    #[command(flatten)]
+    pub event: AgentEventArgs,
+    #[arg(long = "error")]
+    pub error_message: String,
 }
 
 #[derive(Debug, Subcommand)]
@@ -237,6 +276,81 @@ pub enum ConfigCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_agent_finished_subcommand() {
+        let cli = Cli::parse_from([
+            "clawhip",
+            "agent",
+            "finished",
+            "--name",
+            "worker-1",
+            "--session",
+            "sess-123",
+            "--project",
+            "my-repo",
+            "--elapsed",
+            "300",
+            "--summary",
+            "PR created",
+        ]);
+
+        let Commands::Agent { command } = cli.command.expect("agent command") else {
+            panic!("expected agent command");
+        };
+
+        let AgentCommands::Finished(args) = command else {
+            panic!("expected agent finished command");
+        };
+
+        assert_eq!(args.agent_name, "worker-1");
+        assert_eq!(args.session_id.as_deref(), Some("sess-123"));
+        assert_eq!(args.project.as_deref(), Some("my-repo"));
+        assert_eq!(args.elapsed_secs, Some(300));
+        assert_eq!(args.summary.as_deref(), Some("PR created"));
+    }
+
+    #[test]
+    fn parses_agent_failed_subcommand() {
+        let cli = Cli::parse_from([
+            "clawhip",
+            "agent",
+            "failed",
+            "--name",
+            "worker-1",
+            "--session",
+            "sess-123",
+            "--project",
+            "my-repo",
+            "--elapsed",
+            "17",
+            "--summary",
+            "after test run",
+            "--error",
+            "build failed",
+            "--mention",
+            "<@123>",
+            "--channel",
+            "alerts",
+        ]);
+
+        let Commands::Agent { command } = cli.command.expect("agent command") else {
+            panic!("expected agent command");
+        };
+
+        let AgentCommands::Failed(args) = command else {
+            panic!("expected agent failed command");
+        };
+
+        assert_eq!(args.event.agent_name, "worker-1");
+        assert_eq!(args.event.session_id.as_deref(), Some("sess-123"));
+        assert_eq!(args.event.project.as_deref(), Some("my-repo"));
+        assert_eq!(args.event.elapsed_secs, Some(17));
+        assert_eq!(args.event.summary.as_deref(), Some("after test run"));
+        assert_eq!(args.event.mention.as_deref(), Some("<@123>"));
+        assert_eq!(args.event.channel.as_deref(), Some("alerts"));
+        assert_eq!(args.error_message, "build failed");
+    }
 
     #[test]
     fn parses_tmux_watch_subcommand() {

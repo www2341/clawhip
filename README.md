@@ -65,6 +65,71 @@ clawhip tmux new -s issue-456 \
 
 See [`skills/omc/`](skills/omc/) for ready-to-use scripts.
 
+## Recipes
+
+### Dev-channel follow-up cron for Clawdbot
+
+One practical pattern is:
+
+```text
+system cron -> clawhip send -> Discord dev channel -> Clawdbot follows up on open PRs/issues
+```
+
+This works well when you want a lightweight scheduler that nudges your dev channels every 30 minutes without keeping a gateway/LLM session open just for reminders.
+
+Example follow-up script:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+# dev-followup.sh
+# Send a periodic follow-up to active dev channels.
+
+CHANNELS=(
+  "1480171113253175356|clawhip"
+  "1480171113253175357|gaebal-gajae-api"
+  "1480171113253175358|worker-ops"
+)
+
+MENTION="<@1465264645320474637>"
+
+for entry in "${CHANNELS[@]}"; do
+  IFS='|' read -r channel_id project_name <<< "$entry"
+
+  clawhip send \
+    --channel "$channel_id" \
+    --message "🔄 **[$project_name] Dev follow-up** $MENTION — check open PRs/issues, review failed CI, merge anything ready, and continue any stalled work."
+done
+```
+
+You can also send one-off nudges manually:
+
+```bash
+clawhip send \
+  --channel 1480171113253175356 \
+  --message "🔄 **[clawhip] Dev follow-up** <@1465264645320474637> — check open PRs/issues, fix red CI, and continue anything stalled."
+
+clawhip send \
+  --channel 1480171113253175357 \
+  --message "🔄 **[gaebal-gajae-api] PR sweep** <@1465264645320474637> — review open PRs, merge anything ready, and post blockers on anything stuck."
+```
+
+Example system cron config:
+
+```crontab
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+
+*/30 * * * * bellman /home/bellman/bin/dev-followup.sh >> /tmp/dev-followup.log 2>&1
+```
+
+Operational notes:
+- keep one channel entry per active repo/project
+- mention your Clawdbot/OpenClaw bot user so the bot actually wakes up and acts
+- use plain operational language like "check open PRs/issues", "fix red CI", and "continue stalled work"
+- this keeps scheduling outside the agent loop: cron handles timing, clawhip handles delivery, Discord handles the handoff
+
 ## Plugin architecture
 
 clawhip now includes a simple `plugins/` directory for tool-specific shell bridges.
